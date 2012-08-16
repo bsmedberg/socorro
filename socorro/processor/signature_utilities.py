@@ -3,9 +3,9 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import re
+from collections import namedtuple
 
 from configman import Namespace, RequiredConfig
-
 
 #==============================================================================
 class SignatureTool(RequiredConfig):
@@ -39,6 +39,9 @@ class SignatureTool(RequiredConfig):
 
 #==============================================================================
 class CSignatureTool(SignatureTool):
+    Frame = namedtuple('CSignatureTool_Frame',
+                       ('module_name', 'function', 'source', 'source_line', 'instruction'))
+
     required_config = Namespace()
     required_config.add_option(
       'signature_sentinels',
@@ -215,11 +218,12 @@ class CSignatureTool(SignatureTool):
         self.fixupInteger = re.compile(r'(<|, )(\d+)([uUlL]?)([^\w])')
 
     #--------------------------------------------------------------------------
-    def normalize_signature(self, module_name, function, source, source_line,
-                            instruction):
+    def _normalize_signature(self, frame):
         """ returns a structured conglomeration of the input parameters to
         serve as a signature
         """
+        module_name, function, source, source_line, instruction = frame
+
         #if function is not None:
         if function:
             if self.signatures_with_line_numbers_re.match(function):
@@ -246,7 +250,7 @@ class CSignatureTool(SignatureTool):
 
     #--------------------------------------------------------------------------
     def _do_generate(self,
-                     source_list,
+                     frame_list,
                      hang_type,
                      crashed_thread,
                      delimiter=' | '):
@@ -258,6 +262,17 @@ class CSignatureTool(SignatureTool):
         The signature is a ' | ' separated string of frame names
         """
         signature_notes = []
+
+        # shorten frame_list to the first frame with source information,
+        # if present
+        for i in xrange(len(frame_list)):
+            frame = frame_list[i]
+            if frame.source:
+                frame_list = frame_list[i:]
+                break
+
+        source_list = [self._normalize_signature(frame) for frame in frame_list]
+
         # shorten source_list to the first signatureSentinel
         sentinel_locations = []
         for a_sentinel in self.config.signature_sentinels:

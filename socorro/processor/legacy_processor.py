@@ -840,7 +840,7 @@ class LegacyCrashProcessor(RequiredConfig):
                         except AttributeError:
                             pass
                     this_frame_signature = \
-                        self.c_signature_tool.normalize_signature(
+                        self.c_signature_tool.Frame(
                             module_name,
                             function,
                             source,
