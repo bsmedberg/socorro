@@ -16,6 +16,7 @@ import json
 import tempfile
 from urllib import unquote_plus
 from contextlib import closing, contextmanager
+import gzip
 
 from configman import Namespace, RequiredConfig
 from configman.converters import class_converter
@@ -373,22 +374,31 @@ class HybridCrashProcessor(RequiredConfig):
                 crash_id
             ) as raw_crash_json_pathname:
                 for name, dump_pathname in raw_dumps.iteritems():
-                    if name != self.config.dump_field:
-                        processed_crash.additional_minidumps.append(name)
-                    with self._temp_file_context(dump_pathname):
-                        dump_analysis = self._do_breakpad_stack_dump_analysis(
-                            crash_id,
-                            dump_pathname,
-                            raw_crash_json_pathname,
-                            processed_crash.hang_type,
-                            processed_crash.java_stack_trace,
-                            submitted_timestamp,
-                            processor_notes
-                        )
-                    if name == self.config.dump_field:
-                        processed_crash.update(dump_analysis)
+                    # all minidumps should be named "upload_file_minidump"
+                    # or "upload_file_minidump_<name>
+                    if name.startswith(self.config.dump_field):
+                        with self._temp_file_context(dump_pathname):
+                            dump_analysis = self._do_breakpad_stack_dump_analysis(
+                                crash_id,
+                                dump_pathname,
+                                raw_crash_json_pathname,
+                                processed_crash.hang_type,
+                                processed_crash.java_stack_trace,
+                                submitted_timestamp,
+                                processor_notes
+                            )
+                        if name == self.config.dump_field:
+                            processed_crash.update(dump_analysis)
+                        else:
+                            processed_crash.additional_minidumps.append(name)
+                            processed_crash[name] = dump_analysis
+                    elif name == "memory_report":
+                        with self._temp_file_context(dump_pathname):
+                            processed_crash.memory_report = self._extract_memory_info(
+                                dump_pathname
+                            )
                     else:
-                        processed_crash[name] = dump_analysis
+                        processed_crash.setdefault("unexpected_upload", []).append(name)
             processed_crash.topmost_filenames = "|".join(
                 processed_crash.get('topmost_filenames', [])
             )
@@ -865,6 +875,22 @@ class HybridCrashProcessor(RequiredConfig):
             processor_notes
         )
         return processed_crash_update
+
+    def _extract_memory_info(
+        self,
+        dump_pathname
+    ):
+        """Extract and return the JSON data from the .json.gz memory report.
+        file"""
+        try:
+            fd = gzip.open(dump_pathname, "rb")
+            jdata = json.load(fd)
+        except IOError:
+            return {"ERROR": "gzip"}
+        except ValueError:
+            return {"ERROR": "json"}
+
+        return jdata
 
     #--------------------------------------------------------------------------
     @staticmethod
